@@ -1,0 +1,56 @@
+[
+  {
+  "name": "Grafana",
+  "priority": 1,
+  "checks": [
+    { "type": "body", "value": "window.grafanaBootData" },
+    { "type": "body", "value": "grafana-app" }
+  ],
+  "version_regex": "[\"']version[\"']\\s*[:=]\\s*[\"'](\\d+\\.\\d+\\.\\d+(?:-[a-z0-9]+)?)[\"']"
+  },
+  {
+    "name": "Nginx",
+    "priority": 2,
+    "checks": [
+      { "type": "header", "key": "Server", "value": "nginx" }
+    ],
+    "version_regex": "nginx/([0-9\\.]+)"
+  },
+  {
+    "name": "Apache",
+    "priority": 2,
+    "checks": [
+      { "type": "header", "key": "Server", "value": "Apache" }
+    ],
+    "version_regex": "Apache/([0-9\\.]+)"
+  },
+  {
+    "name": "WordPress",
+    "priority": 1,
+    "checks": [
+      { "type": "body", "value": "/wp-content/" },
+      { "type": "header", "key": "Link", "value": "wp-json" }
+    ],
+    "version_regex": "ver=([0-9\\.]+)|content=\"WordPress ([0-9\\.]+)\""
+  },
+  {
+    "name": "Django",
+    "priority": 1,
+    "checks": [
+      { "type": "header", "key": "Set-Cookie", "value": "csrftoken" },
+      { "type": "body", "value": "csrfmiddlewaretoken" },
+      { "type": "header", "key": "X-Frame-Options", "value": "SAMEORIGIN" }
+    ],
+    "version_regex": "Django/([0-9\\.]+)"
+  },
+  {
+    "name": "Drupal",
+    "priority": 1,
+    "checks": [
+      { "type": "header", "key": "X-Generator", "value": "Drupal" },
+      { "type": "body", "value": "Drupal.settings" },
+      { "type": "header", "key": "X-Drupal-Cache", "value": "" }
+    ],
+    "version_regex": "Drupal\\s+([0-9\\.]+)|\\s([0-9]+)\\.x"
+  }
+]

@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+
+# Logs y Reportes
+reports/*
+*.log
+
+# Seguridad
+data/wordlists/custom_secrets.txt

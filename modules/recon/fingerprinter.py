@@ -1,87 +1,99 @@
-import aiohttp
-import json
 import re
+import aiohttp
 import asyncio
+import json
 
 class Fingerprinter:
     def __init__(self, target, signatures_path, session_cookies=None):
-        if not target.startswith(('http://', 'https://')):
-            self.target = f"https://{target.rstrip('/')}"
-        else:
-            self.target = target.rstrip('/')
-            
+        self.target = target.rstrip('/')
         self.signatures_path = signatures_path
         self.cookies = session_cookies or {}
         self.results = []
+        self.detected_names = set()
 
-    def load_signatures(self):
+    async def fetch(self, session, path="/"):
+        # Cabeceras profesionales para evitar bloqueos por User-Agent (Drupal/WAF)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,webp,*/*;q=0.8",
+            "Accept-Language": "es-ES,es;q=0.8,en-US;q=0.5,en;q=0.3",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1"
+        }
         try:
-            with open(self.signatures_path, 'r') as f:
-                return json.load(f)
-        except Exception as e:
-            return []
+            async with session.get(self.target + path, timeout=12, ssl=False, headers=headers) as resp:
+                return await resp.text(), resp.headers, resp.status
+        except Exception:
+            return "", {}, 0
 
     async def analyze(self):
-        signatures = self.load_signatures()
-        # Priorizar firmas específicas
-        signatures = sorted(signatures, key=lambda x: x.get('priority', 10))
+        try:
+            with open(self.signatures_path, 'r', encoding='utf-8') as f:
+                sigs = json.load(f)
+        except Exception as e:
+            return [{"error": f"Fallo al cargar firmas: {str(e)}"}]
+
+        async with aiohttp.ClientSession(cookies=self.cookies) as session:
+            body, headers, status = await self.fetch(session)
+            
+            if status == 0:
+                return [{"error": "Objetivo inalcanzable (Timeout/DNS)."}]
+            
+            if status == 403:
+                print("[!] Advertencia: Acceso Denegado (403). Intentando fingerprinting limitado...")
+
+            # Unificar categorías para el escaneo
+            all_sigs = sigs.get('frameworks', []) + sigs.get('servers', []) + sigs.get('libraries', [])
+            await self._scan_layer(session, all_sigs, body, headers)
+            
+            return self.results
+
+    async def _scan_layer(self, session, signatures, body, headers):
+        for tech in signatures:
+            if tech['name'] in self.detected_names: continue
+
+            detected = False
+            for check in tech.get('checks', []):
+                if check['type'] == 'body' and check['value'] in body:
+                    detected = True
+                    break
+                elif check['type'] == 'header' and check['key'] in headers:
+                    if check['value'].lower() in headers[check['key']].lower():
+                        detected = True
+                        break
+
+            if detected:
+                self.detected_names.add(tech['name'])
+                version, confidence = await self._verify_version_advanced(session, tech, body, headers)
+                
+                self.results.append({
+                    "technology": tech['name'],
+                    "version": version,
+                    "confidence": f"{confidence * 100:.1f}%"
+                })
+
+    async def _verify_version_advanced(self, session, tech, body, headers):
+        candidates = []
+
+        # 1. Chequeos Agresivos (Confianza Máxima)
+        for a_check in tech.get('aggressive_checks', []):
+            v_body, _, v_status = await self.fetch(session, a_check['path'])
+            if v_status == 200:
+                match = re.search(a_check['regex'], v_body, re.I)
+                if match:
+                    candidates.append((match.group(1), 1.0))
+
+        # 2. Chequeos Pasivos
+        for v_check in tech.get('version_checks', []):
+            source = body if v_check['location'] == 'body' else headers.get(v_check.get('key', 'Server'), "")
+            match = re.search(v_check['regex'], source, re.I)
+            if match:
+                conf = v_check.get("confidence", 0.7)
+                candidates.append((match.group(1), conf))
+
+        if not candidates:
+            return "Unknown", 0.5
         
-        headers = {"User-Agent": "DarkScan/1.2 (WhatWeb-Inspired)"}
-        
-        async with aiohttp.ClientSession(cookies=self.cookies, headers=headers) as session:
-            try:
-                # PASO 1: Análisis del Index
-                async with session.get(self.target, timeout=10, ssl=False) as response:
-                    body = await response.text()
-                    resp_headers = response.headers
-                    
-                    for tech in signatures:
-                        match_count = 0
-                        is_match = False
-                        
-                        # Verificación de firmas
-                        for check in tech['checks']:
-                            if check['type'] == 'header' and check.get('key') in resp_headers:
-                                if check['value'].lower() in resp_headers[check['key']].lower():
-                                    match_count += 1
-                                    is_match = True
-                            elif check['type'] == 'body' and check['value'] in body:
-                                match_count += 1
-                                is_match = True
-
-                        if is_match:
-                            version = "Unknown"
-                            
-                            # Intentar extraer versión con Regex mejorada
-                            if "version_regex" in tech:
-                                v_match = re.search(tech['version_regex'], body, re.IGNORECASE)
-                                if v_match:
-                                    version = v_match.group(1) if v_match.groups() else v_match.group(0)
-
-                            # PASO 2: Lógica de Re-intento Activo (Tipo WhatWeb)
-                            # Si detectamos Grafana pero la versión es dudosa o no está, consultamos API
-                            if tech['name'] == "Grafana" and (version == "Unknown" or version == "1.0.0"):
-                                try:
-                                    async with session.get(f"{self.target}/api/health", timeout=5) as v_resp:
-                                        if v_resp.status == 200:
-                                            v_data = await v_resp.json()
-                                            if 'version' in v_data:
-                                                version = v_data['version']
-                                except:
-                                    pass # Si el API falla, nos quedamos con lo que tenemos
-
-                            # Fallback para servidores web (Nginx/Apache) vía Header
-                            if version == "Unknown" and "Server" in resp_headers:
-                                s_match = re.search(r'/([0-9\.]+)', resp_headers['Server'])
-                                if s_match: version = s_match.group(1)
-
-                            self.results.append({
-                                "technology": tech['name'],
-                                "version": version,
-                                "confidence": f"{(match_count / len(tech['checks'])) * 100:.1f}%"
-                            })
-                            
-                return self.results
-
-            except Exception as e:
-                return [{"error": f"Fallo de conexión: {str(e)}"}]
+        # Devolver el candidato con mayor confianza
+        candidates.sort(key=lambda x: x[1], reverse=True)
+        return candidates[0][0], candidates[0][1]

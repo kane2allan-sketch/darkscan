@@ -1,56 +1,93 @@
-[
-  {
-  "name": "Grafana",
-  "priority": 1,
-  "checks": [
-    { "type": "body", "value": "window.grafanaBootData" },
-    { "type": "body", "value": "grafana-app" }
+{
+  "frameworks": [
+    {
+      "name": "Grafana",
+      "priority": 1,
+      "checks": [
+        { "type": "body", "value": "window.grafanaBootData" },
+        { "type": "body", "value": "grafana-app" }
+      ],
+      "version_checks": [
+        { 
+          "location": "body", 
+          "regex": "\\\"version\\\"\\s*:\\s*\\\"(\\d+\\.\\d+\\.\\d+)\\\",\\s*\\\"commit\\\"",
+          "confidence": 0.9,
+          "note": "Busca la versión seguida del commit, excluyendo schemaVersions"
+        }
+      ],
+      "aggressive_checks": [
+        { 
+          "path": "/api/health", 
+          "regex": "\\\"version\\\"\\s*:\\s*\\\"([0-9.]+)\\\"",
+          "note": "Fuente de verdad absoluta de Grafana" 
+        }
+      ]
+    },
+    {
+      "name": "Next.js",
+      "priority": 1,
+      "checks": [
+        { "type": "body", "value": "/_next/static" },
+        { "type": "header", "key": "X-Powered-By", "value": "Next.js" }
+      ],
+      "version_checks": [
+        { "location": "body", "regex": "/_next/static/([^/]+)/_buildManifest.js", "confidence": 0.6 }
+      ],
+      "aggressive_checks": [
+        { "path": "/_next/static/BUILD_ID", "regex": "(.*)", "note": "ID de compilación específico" }
+      ]
+    },
+    {
+      "name": "React",
+      "priority": 1,
+      "checks": [
+        { "type": "body", "value": "data-reactroot" },
+        { "type": "body", "value": "_reactRootContainer" }
+      ],
+      "version_checks": [
+        { "location": "body", "regex": "react@([0-9.]+)", "confidence": 0.8 }
+      ]
+    },
+    {
+      "name": "Drupal",
+      "priority": 1,
+      "checks": [
+        { "type": "header", "key": "X-Generator", "value": "Drupal" },
+        { "type": "header", "key": "X-Drupal-Cache", "value": "" },
+        { "type": "body", "value": "Drupal.settings" },
+        { "type": "body", "value": "/sites/all/themes" },
+        { "type": "body", "value": "jQuery.extend(Drupal.settings" }
+      ],
+      "version_checks": [
+        { "location": "header", "key": "X-Generator", "regex": "Drupal ([0-9.]+)", "confidence": 1.0 },
+        { "location": "body", "regex": "Drupal\\.settings.*\"version\":\"([0-9.]+)\"", "confidence": 0.8 },
+        { "location": "body", "regex": "sites/all/modules/.*v=([0-9.]+)", "confidence": 0.6 }
+      ],
+      "aggressive_checks": [
+        { "path": "/CHANGELOG.txt", "regex": "Drupal ([0-9.]+)", "note": "Clásico en Drupal 7" },
+        { "path": "/includes/bootstrap.inc", "regex": "define\\('VERSION', '([0-9.]+)'\\)", "note": "Acceso a core" }
+      ]
+    }
   ],
-  "version_regex": "[\"']version[\"']\\s*[:=]\\s*[\"'](\\d+\\.\\d+\\.\\d+(?:-[a-z0-9]+)?)[\"']"
-  },
-  {
-    "name": "Nginx",
-    "priority": 2,
-    "checks": [
-      { "type": "header", "key": "Server", "value": "nginx" }
-    ],
-    "version_regex": "nginx/([0-9\\.]+)"
-  },
-  {
-    "name": "Apache",
-    "priority": 2,
-    "checks": [
-      { "type": "header", "key": "Server", "value": "Apache" }
-    ],
-    "version_regex": "Apache/([0-9\\.]+)"
-  },
-  {
-    "name": "WordPress",
-    "priority": 1,
-    "checks": [
-      { "type": "body", "value": "/wp-content/" },
-      { "type": "header", "key": "Link", "value": "wp-json" }
-    ],
-    "version_regex": "ver=([0-9\\.]+)|content=\"WordPress ([0-9\\.]+)\""
-  },
-  {
-    "name": "Django",
-    "priority": 1,
-    "checks": [
-      { "type": "header", "key": "Set-Cookie", "value": "csrftoken" },
-      { "type": "body", "value": "csrfmiddlewaretoken" },
-      { "type": "header", "key": "X-Frame-Options", "value": "SAMEORIGIN" }
-    ],
-    "version_regex": "Django/([0-9\\.]+)"
-  },
-  {
-    "name": "Drupal",
-    "priority": 1,
-    "checks": [
-      { "type": "header", "key": "X-Generator", "value": "Drupal" },
-      { "type": "body", "value": "Drupal.settings" },
-      { "type": "header", "key": "X-Drupal-Cache", "value": "" }
-    ],
-    "version_regex": "Drupal\\s+([0-9\\.]+)|\\s([0-9]+)\\.x"
-  }
-]
+  "servers": [
+    {
+      "name": "Nginx",
+      "priority": 2,
+      "checks": [{ "type": "header", "key": "Server", "value": "nginx" }],
+      "version_checks": [
+        { "location": "header", "key": "Server", "regex": "nginx/([0-9.]+)", "confidence": 1.0 }
+      ]
+    },
+    {
+      "name": "Apache",
+      "priority": 2,
+      "checks": [
+        { "type": "header", "key": "Server", "value": "Apache" },
+        { "type": "header", "key": "Server", "value": "HTTPD" }
+      ],
+      "version_checks": [
+        { "location": "header", "key": "Server", "regex": "Apache/([0-9.]+)", "confidence": 1.0 }
+      ]
+    }
+  ]
+}
